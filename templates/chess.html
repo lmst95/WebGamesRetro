@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <section class="view active" id="chessView" data-game="{{ game_mode }}" data-player="{{ player }}">
+    <div class="chess-header">
+      <div>
+        <h1>{{ title }}</h1>
+        <p class="lead">{{ subtitle }}</p>
+      </div>
+      {% if show_actions %}
+      <div class="chess-actions" id="chessActions">
+        <a class="btn" href="/games/chess/p1">Player 1 view</a>
+        <a class="btn ghost" href="/games/chess/p2">Player 2 view</a>
+      </div>
+      {% endif %}
+    </div>
+    <div class="chess-stage">
+      <div class="console">
+        <div class="console-bar">match://chess | state: idle | turn: white</div>
+        <div class="console-bar" id="statsLine">stats://p1 0 wins | p2 0 wins | draws 0 | games 0</div>
+        <div class="console-bar" id="timeLine">time://last --:-- | game --:--</div>
+        <div class="console-bar" id="seatLine">seat://p1 open | p2 open</div>
+        <div class="console-bar" id="roleLine">role://visitor</div>
+        <pre id="chessBoard" class="board" aria-live="polite"></pre>
+        <div class="console-input">
+          <div class="console-label">active player: <span id="activePlayer">1</span></div>
+          <form id="moveForm" class="console-form" autocomplete="off">
+            <input id="fromField" class="console-field" type="text" inputmode="text" maxlength="2" placeholder="from" />
+            <span class="console-sep">to</span>
+            <input id="toField" class="console-field" type="text" inputmode="text" maxlength="2" placeholder="to" />
+            <button class="console-btn" type="submit">enter</button>
+          </form>
+        </div>
+        <div class="console-bar">{{ footer_note }}</div>
+      </div>
+      <aside class="gamelog">
+        <div class="gamelog-title">Game log</div>
+        <div id="moveLog" class="gamelog-list" aria-live="polite"></div>
+      </aside>
+    </div>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  <script src="/static/games/chess.js"></script>
+{% endblock %}

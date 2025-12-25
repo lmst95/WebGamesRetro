@@ -1,0 +1,52 @@
+# Web Games Console Style
+
+Retro console-style mini-game hub with a focus on ASCII/terminal visuals.
+
+## Usage
+
+Run the FastAPI server and open the app in your browser:
+
+```bash
+python -m pip install -r requirements.txt
+uvicorn server:app --reload
+```
+
+Open `http://127.0.0.1:8000`.
+
+### Chess games
+
+Public game (anyone can move for the current player):
+- `/games/chess/p1` for Player 1 view.
+- `/games/chess/p2` for Player 2 view.
+
+Seats game (two seats with 5-minute turn expiry, everyone else is a visitor):
+- `/games/chess/seats` to claim Seat 1 (white) or Seat 2 (black).
+
+## How to add a new game
+
+1) Create a template for the game page:
+   - Add `templates/<game>.html` and extend `templates/base.html`.
+   - Include a game script in a `{% block scripts %}` section.
+
+2) Add frontend assets:
+   - Put shared styles in `static/css/base.css`.
+   - Add per-game logic to `static/games/<game>.js`.
+
+3) Add backend routes and API:
+   - Create `games/<game>.py` and define an `APIRouter`.
+   - Register the router in `server.py` with `app.include_router(...)`.
+   - Add the page routes in `server.py` (e.g., `/games/<game>/...`) that render the template.
+
+4) Link it in the UI:
+   - Add navigation links in `templates/base.html` and cards in `templates/home.html`.
+
+## Ideas
+- A website where you can play many games.
+- The whole website style should be retro and pixel-look.
+- Game states are saved in a simple json-file.
+- Games:
+  - Chess (console style). A page where you can play chess for player "1" or "2" by appending it to the link (like `.../chess/1/` or `.../chess/2/`).
+    - Everyone can play, without login.
+    - Normal chess rules, no time limit.
+    - Chessboard style is console-like: black background, white/neon-green fields, and figures only with ASCII/UTF-8 symbols.
+    - Depending on the player, your side is on the bottom and the enemy is on top.

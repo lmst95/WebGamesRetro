@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <section class="view active">
+    <h1>Choose your game</h1>
+    <p class="lead">A neon console-style collection. No logins. Just play.</p>
+    <div class="cards">
+      <article class="card">
+        <h2>Chess</h2>
+        <p>Classic rules, no time limit, console visuals.</p>
+        <div class="card-actions">
+          <a class="btn" href="/games/chess/p1">Play as P1</a>
+          <a class="btn ghost" href="/games/chess/p2">Play as P2</a>
+          <a class="btn" href="/games/chess/seats">Seats mode</a>
+        </div>
+      </article>
+      <article class="card muted">
+        <h2>More games</h2>
+        <p>Coming soon. Add another idea to the list and it appears here.</p>
+      </article>
+    </div>
+  </section>
+{% endblock %}

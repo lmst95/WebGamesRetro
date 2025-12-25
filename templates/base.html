@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title or "Web Games Console Style" }}</title>
+    <link rel="stylesheet" href="/static/css/base.css" />
+    {% block head_extra %}{% endblock %}
+  </head>
+  <body>
+    <div class="bg-grid" aria-hidden="true"></div>
+    <header class="site-header">
+      <div class="brand">
+        <span class="brand-mark">WG</span>
+        <div class="brand-text">
+          <div class="title">Web Games Console</div>
+          <div class="subtitle">Retro arcade hub</div>
+        </div>
+      </div>
+      <button class="burger" id="burger" aria-label="Toggle menu" aria-expanded="false">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+      <nav class="site-nav" id="navMenu">
+        <a href="/">Home</a>
+        <a href="/games/chess/p1">Chess P1</a>
+        <a href="/games/chess/p2">Chess P2</a>
+        <a href="/games/chess/seats">Chess Seats</a>
+      </nav>
+    </header>
+
+    <main class="content">
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="site-footer">SQLite persistence planned. Retro pixel vibe locked in.</footer>
+
+    <div class="modal" id="gameModal" aria-hidden="true">
+      <div class="modal-card">
+        <div class="modal-title" id="modalTitle">Checkmate</div>
+        <p class="modal-body" id="modalBody">Winner: Player 1</p>
+        <button class="btn" id="newGameBtn">New game</button>
+      </div>
+    </div>
+
+    <script src="/static/js/base.js"></script>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

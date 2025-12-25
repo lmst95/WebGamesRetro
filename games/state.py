@@ -1,0 +1,174 @@
+from __future__ import annotations
+
+import json
+import secrets
+import threading
+import time
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+ROOT = Path(__file__).resolve().parent.parent
+STATE_FILE = ROOT / "gamestate.json"
+SEAT_TIMEOUT_SECONDS = 5 * 60
+
+GAME_PUBLIC = "public"
+GAME_SEATS = "seats"
+
+state_lock = threading.Lock()
+
+
+def default_game_state() -> Dict[str, Any]:
+    return {
+        "board": [
+            "rnbqkbnr",
+            "pppppppp",
+            "........",
+            "........",
+            "........",
+            "........",
+            "PPPPPPPP",
+            "RNBQKBNR",
+        ],
+        "current_player": 1,
+        "move_history": [],
+        "game_over": False,
+        "result": None,
+        "stats": {"p1_wins": 0, "p2_wins": 0, "draws": 0, "total_games": 0},
+        "started_at": None,
+        "last_played_at": None,
+        "version": 0,
+    }
+
+
+def default_state() -> Dict[str, Any]:
+    return {
+        "games": {
+            GAME_PUBLIC: default_game_state(),
+            GAME_SEATS: {**default_game_state(), "seats": {"p1": None, "p2": None}},
+        }
+    }
+
+
+STATE: Dict[str, Any] = default_state()
+
+
+def merge_game_state(defaults: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(defaults)
+    for key, value in incoming.items():
+        if key == "stats" and isinstance(value, dict):
+            stats = dict(defaults["stats"])
+            for stat_key, stat_value in value.items():
+                stats[stat_key] = stat_value
+            merged["stats"] = stats
+        elif key == "seats" and isinstance(value, dict):
+            merged["seats"] = {
+                "p1": value.get("p1"),
+                "p2": value.get("p2"),
+            }
+        else:
+            merged[key] = value
+    if "seats" in defaults and "seats" not in merged:
+        merged["seats"] = {"p1": None, "p2": None}
+    return merged
+
+
+def load_state() -> None:
+    global STATE
+    if not STATE_FILE.exists():
+        STATE = default_state()
+        return
+    try:
+        data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        STATE = default_state()
+        return
+    if not isinstance(data, dict):
+        STATE = default_state()
+        return
+    if "games" not in data and "board" in data:
+        migrated = default_state()
+        migrated["games"][GAME_PUBLIC] = merge_game_state(default_game_state(), data)
+        STATE = migrated
+        return
+    games = data.get("games")
+    if not isinstance(games, dict):
+        STATE = default_state()
+        return
+    state = default_state()
+    for game_id in (GAME_PUBLIC, GAME_SEATS):
+        if game_id in games and isinstance(games[game_id], dict):
+            state["games"][game_id] = merge_game_state(state["games"][game_id], games[game_id])
+    STATE = state
+
+
+def save_state() -> None:
+    STATE_FILE.write_text(json.dumps(STATE, indent=2), encoding="utf-8")
+
+
+def get_game_id(game: str) -> str:
+    return GAME_SEATS if game == GAME_SEATS else GAME_PUBLIC
+
+
+def get_game(game_id: str) -> Dict[str, Any]:
+    return STATE["games"][game_id]
+
+
+def with_meta(game_id: str, game: Dict[str, Any], token: Optional[str] = None) -> Dict[str, Any]:
+    response = dict(game)
+    response["game_id"] = game_id
+    response["server_time"] = int(time.time())
+    if game_id == GAME_SEATS:
+        seat_player = seat_player_for_token(game, token)
+        response["seat_info"] = {
+            "p1": game["seats"]["p1"] is not None,
+            "p2": game["seats"]["p2"] is not None,
+            "player": seat_player or 0,
+        }
+    return response
+
+
+def expire_seats(game: Dict[str, Any], now: int) -> bool:
+    seats = game.get("seats")
+    if not isinstance(seats, dict):
+        return False
+    current_player = game.get("current_player")
+    changed = False
+    for key, player in (("p1", 1), ("p2", 2)):
+        if player != current_player:
+            continue
+        seat = seats.get(key)
+        if not seat:
+            continue
+        last_active = seat.get("last_active") or seat.get("assigned_at")
+        if last_active and now - last_active > SEAT_TIMEOUT_SECONDS:
+            seats[key] = None
+            changed = True
+    return changed
+
+
+def seat_player_for_token(game: Dict[str, Any], token: Optional[str]) -> Optional[int]:
+    if not token or "seats" not in game:
+        return None
+    for player, key in ((1, "p1"), (2, "p2")):
+        seat = game["seats"].get(key)
+        if seat and seat.get("token") == token:
+            return player
+    return None
+
+
+def claim_seat(game: Dict[str, Any], token: Optional[str], now: int) -> Dict[str, Any]:
+    expire_seats(game, now)
+    existing_player = seat_player_for_token(game, token)
+    if existing_player:
+        return {"player": existing_player, "token": token}
+
+    seats = game["seats"]
+    available = [key for key in ("p1", "p2") if seats.get(key) is None]
+    if not available:
+        return {"player": 0, "token": token}
+
+    seat_key = "p1" if "p1" in available else available[0]
+    new_token = token or secrets.token_urlsafe(16)
+    seats[seat_key] = {"token": new_token, "assigned_at": now, "last_active": None}
+    player_number = 1 if seat_key == "p1" else 2
+    return {"player": player_number, "token": new_token}
