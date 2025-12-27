@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import threading
 import time
@@ -10,6 +11,7 @@ from typing import Any, Dict, Optional
 ROOT = Path(__file__).resolve().parent.parent
 STATE_FILE = ROOT / "gamestate.json"
 SEAT_TIMEOUT_SECONDS = 5 * 60
+MAX_HISTORY = 200
 
 GAME_PUBLIC = "public"
 GAME_SEATS = "seats"
@@ -61,9 +63,19 @@ def merge_game_state(defaults: Dict[str, Any], incoming: Dict[str, Any]) -> Dict
                 stats[stat_key] = stat_value
             merged["stats"] = stats
         elif key == "seats" and isinstance(value, dict):
+            def normalize_seat(seat: Any) -> Any:
+                if not isinstance(seat, dict):
+                    return seat
+                if "session_id" in seat:
+                    return seat
+                if "token" in seat:
+                    seat = dict(seat)
+                    seat["session_id"] = seat.pop("token")
+                return seat
+
             merged["seats"] = {
-                "p1": value.get("p1"),
-                "p2": value.get("p2"),
+                "p1": normalize_seat(value.get("p1")),
+                "p2": normalize_seat(value.get("p2")),
             }
         else:
             merged[key] = value
@@ -102,7 +114,10 @@ def load_state() -> None:
 
 
 def save_state() -> None:
-    STATE_FILE.write_text(json.dumps(STATE, indent=2), encoding="utf-8")
+    payload = json.dumps(STATE, indent=2)
+    tmp_path = STATE_FILE.with_suffix(".json.tmp")
+    tmp_path.write_text(payload, encoding="utf-8")
+    os.replace(tmp_path, STATE_FILE)
 
 
 def get_game_id(game: str) -> str:
@@ -113,12 +128,12 @@ def get_game(game_id: str) -> Dict[str, Any]:
     return STATE["games"][game_id]
 
 
-def with_meta(game_id: str, game: Dict[str, Any], token: Optional[str] = None) -> Dict[str, Any]:
+def with_meta(game_id: str, game: Dict[str, Any], session_id: Optional[str] = None) -> Dict[str, Any]:
     response = dict(game)
     response["game_id"] = game_id
     response["server_time"] = int(time.time())
     if game_id == GAME_SEATS:
-        seat_player = seat_player_for_token(game, token)
+        seat_player = seat_player_for_session(game, session_id)
         response["seat_info"] = {
             "p1": game["seats"]["p1"] is not None,
             "p2": game["seats"]["p2"] is not None,
@@ -146,29 +161,29 @@ def expire_seats(game: Dict[str, Any], now: int) -> bool:
     return changed
 
 
-def seat_player_for_token(game: Dict[str, Any], token: Optional[str]) -> Optional[int]:
-    if not token or "seats" not in game:
+def seat_player_for_session(game: Dict[str, Any], session_id: Optional[str]) -> Optional[int]:
+    if not session_id or "seats" not in game:
         return None
     for player, key in ((1, "p1"), (2, "p2")):
         seat = game["seats"].get(key)
-        if seat and seat.get("token") == token:
+        if seat and seat.get("session_id") == session_id:
             return player
     return None
 
 
-def claim_seat(game: Dict[str, Any], token: Optional[str], now: int) -> Dict[str, Any]:
+def claim_seat(game: Dict[str, Any], session_id: Optional[str], now: int) -> Dict[str, Any]:
     expire_seats(game, now)
-    existing_player = seat_player_for_token(game, token)
+    existing_player = seat_player_for_session(game, session_id)
     if existing_player:
-        return {"player": existing_player, "token": token}
+        return {"player": existing_player, "session_id": session_id}
 
     seats = game["seats"]
     available = [key for key in ("p1", "p2") if seats.get(key) is None]
     if not available:
-        return {"player": 0, "token": token}
+        return {"player": 0, "session_id": session_id}
 
     seat_key = "p1" if "p1" in available else available[0]
-    new_token = token or secrets.token_urlsafe(16)
-    seats[seat_key] = {"token": new_token, "assigned_at": now, "last_active": None}
+    new_session_id = session_id or secrets.token_urlsafe(16)
+    seats[seat_key] = {"session_id": new_session_id, "assigned_at": now, "last_active": None}
     player_number = 1 if seat_key == "p1" else 2
-    return {"player": player_number, "token": new_token}
+    return {"player": player_number, "session_id": new_session_id}

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
 
 from games.chess import router as chess_router
 from games.state import GAME_PUBLIC, GAME_SEATS, load_state, state_lock
@@ -15,6 +17,22 @@ ROOT = Path(__file__).resolve().parent
 app = FastAPI()
 templates = Jinja2Templates(directory=str(ROOT / "templates"))
 app.mount("/static", StaticFiles(directory=str(ROOT / "static")), name="static")
+
+SECRET_KEY = os.environ.get("SECRET_KEY")
+SESSION_COOKIE = os.environ.get("SESSION_COOKIE", "web_games_session")
+SESSION_SECURE = os.environ.get("SESSION_SECURE", "true").lower() in ("1", "true", "yes")
+SESSION_SAMESITE = os.environ.get("SESSION_SAMESITE", "lax")
+
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY must be set for signed session cookies.")
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SECRET_KEY,
+    session_cookie=SESSION_COOKIE,
+    https_only=SESSION_SECURE,
+    same_site=SESSION_SAMESITE,
+)
 
 
 @app.on_event("startup")

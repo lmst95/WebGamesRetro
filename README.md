@@ -8,10 +8,15 @@ Run the FastAPI server and open the app in your browser:
 
 ```bash
 python -m pip install -r requirements.txt
+export SECRET_KEY="replace-with-a-long-random-value"
 uvicorn server:app --reload
 ```
 
 Open `http://127.0.0.1:8000`.
+
+## Production notes
+- Set `SECRET_KEY` to a long random value; required for signed session cookies.
+- Set `SESSION_SECURE=true` when serving behind HTTPS (recommended).
 
 ### Chess games
 

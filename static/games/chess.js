@@ -27,12 +27,10 @@ const initialBoard = [
 ];
 
 const files = ["a", "b", "c", "d", "e", "f", "g", "h"];
-const SEAT_TOKEN_KEY = "chessSeatToken";
 let boardState = initialBoard.map((row) => row.split(""));
 let currentPlayer = 1;
 let viewPlayer = chessView ? Number(chessView.dataset.player || 0) : 0;
 let gameMode = chessView ? chessView.dataset.game || "public" : "public";
-let seatToken = null;
 let seatPlayer = 0;
 const moveHistory = [];
 let gameOver = false;
@@ -153,11 +151,7 @@ function getGameQuery() {
 
 function buildStateUrl() {
   const game = getGameQuery();
-  let url = `/state?game=${game}`;
-  if (gameMode === "seats" && seatToken) {
-    url += `&token=${encodeURIComponent(seatToken)}`;
-  }
-  return url;
+  return `/state?game=${game}`;
 }
 
 async function fetchState() {
@@ -291,7 +285,6 @@ async function submitMove(from, to) {
         player: viewPlayer,
         from,
         to,
-        token: gameMode === "seats" ? seatToken : null,
       }),
     });
     if (!response.ok) {
@@ -328,7 +321,6 @@ async function requestReset() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         player: viewPlayer,
-        token: gameMode === "seats" ? seatToken : null,
       }),
     });
     if (!response.ok) {
@@ -346,11 +338,10 @@ async function requestReset() {
 
 async function claimSeat() {
   try {
-    const storedToken = seatToken || localStorage.getItem(SEAT_TOKEN_KEY);
     const response = await fetch("/seat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: storedToken }),
+      body: JSON.stringify({}),
     });
     if (!response.ok) {
       return;
@@ -358,10 +349,6 @@ async function claimSeat() {
     const data = await response.json();
     if (!data.ok) {
       return;
-    }
-    seatToken = data.token || null;
-    if (seatToken) {
-      localStorage.setItem(SEAT_TOKEN_KEY, seatToken);
     }
     seatPlayer = data.player || 0;
     viewPlayer = seatPlayer || 0;

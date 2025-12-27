@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import secrets
 import time
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
+from games.limiter import allow_request
 from games.state import (
     GAME_PUBLIC,
     GAME_SEATS,
@@ -14,8 +16,9 @@ from games.state import (
     expire_seats,
     get_game,
     get_game_id,
+    MAX_HISTORY,
     save_state,
-    seat_player_for_token,
+    seat_player_for_session,
     state_lock,
     with_meta,
 )
@@ -27,7 +30,6 @@ class MoveRequest(BaseModel):
     player: int
     from_square: str = Field(..., alias="from")
     to_square: str = Field(..., alias="to")
-    token: Optional[str] = None
 
     class Config:
         populate_by_name = True
@@ -35,14 +37,38 @@ class MoveRequest(BaseModel):
 
 class ResetRequest(BaseModel):
     player: int
-    token: Optional[str] = None
 
 
 class SeatRequest(BaseModel):
-    token: Optional[str] = None
+    pass
 
 
 FILES = ["a", "b", "c", "d", "e", "f", "g", "h"]
+STATE_RATE_LIMIT = (240, 60)
+MUTATION_RATE_LIMIT = (30, 60)
+
+
+def get_session_id(request: Request) -> str:
+    session_id = request.session.get("session_id")
+    if not session_id:
+        session_id = secrets.token_urlsafe(16)
+        request.session["session_id"] = session_id
+    return session_id
+
+
+def client_bucket(request: Request, action: str) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        client_ip = forwarded.split(",")[0].strip()
+    else:
+        client_ip = request.client.host if request.client else "unknown"
+    return f"{client_ip}:{action}"
+
+
+def enforce_rate_limit(request: Request, action: str, limit: int, window: int) -> None:
+    bucket = client_bucket(request, action)
+    if not allow_request(bucket, limit, window):
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Rate limit exceeded")
 
 
 def coord_to_index(coord: str) -> Optional[Dict[str, int]]:
@@ -252,7 +278,9 @@ def check_for_game_end(board: List[List[str]], player_to_move: int) -> Optional[
 
 
 @router.get("/state")
-def get_state(game: str = Query(GAME_PUBLIC), token: Optional[str] = None) -> Dict[str, Any]:
+def get_state(request: Request, game: str = Query(GAME_PUBLIC)) -> Dict[str, Any]:
+    enforce_rate_limit(request, "state", *STATE_RATE_LIMIT)
+    session_id = get_session_id(request)
     with state_lock:
         game_id = get_game_id(game)
         current = get_game(game_id)
@@ -260,23 +288,27 @@ def get_state(game: str = Query(GAME_PUBLIC), token: Optional[str] = None) -> Di
             if expire_seats(current, int(time.time())):
                 current["version"] += 1
                 save_state()
-        return with_meta(game_id, current, token)
+        return with_meta(game_id, current, session_id)
 
 
 @router.post("/seat")
-def seat(payload: SeatRequest) -> Dict[str, Any]:
+def seat(request: Request, payload: SeatRequest) -> Dict[str, Any]:
+    enforce_rate_limit(request, "seat", *MUTATION_RATE_LIMIT)
+    session_id = get_session_id(request)
     with state_lock:
         game = get_game(GAME_SEATS)
         now = int(time.time())
-        seat_result = claim_seat(game, payload.token, now)
+        seat_result = claim_seat(game, session_id, now)
         game["version"] += 1
         save_state()
-        response = with_meta(GAME_SEATS, game, seat_result["token"])
-        return {"ok": True, "player": seat_result["player"], "token": seat_result["token"], "state": response}
+        response = with_meta(GAME_SEATS, game, seat_result["session_id"])
+        return {"ok": True, "player": seat_result["player"], "state": response}
 
 
 @router.post("/move")
-def post_move(payload: MoveRequest, game: str = Query(GAME_PUBLIC)) -> Dict[str, Any]:
+def post_move(request: Request, payload: MoveRequest, game: str = Query(GAME_PUBLIC)) -> Dict[str, Any]:
+    enforce_rate_limit(request, "move", *MUTATION_RATE_LIMIT)
+    session_id = get_session_id(request)
     with state_lock:
         game_id = get_game_id(game)
         current = get_game(game_id)
@@ -287,47 +319,47 @@ def post_move(payload: MoveRequest, game: str = Query(GAME_PUBLIC)) -> Dict[str,
             if seat_changed:
                 current["version"] += 1
                 save_state()
-            return {"ok": False, "error": "Game over", "state": with_meta(game_id, current, payload.token)}
+            return {"ok": False, "error": "Game over", "state": with_meta(game_id, current, session_id)}
         if payload.player not in (1, 2):
             if seat_changed:
                 current["version"] += 1
                 save_state()
-            return {"ok": False, "error": "Invalid player", "state": with_meta(game_id, current, payload.token)}
+            return {"ok": False, "error": "Invalid player", "state": with_meta(game_id, current, session_id)}
         if payload.player != current["current_player"]:
             if seat_changed:
                 current["version"] += 1
                 save_state()
-            return {"ok": False, "error": "Not your turn", "state": with_meta(game_id, current, payload.token)}
+            return {"ok": False, "error": "Not your turn", "state": with_meta(game_id, current, session_id)}
         from_idx = coord_to_index(payload.from_square.lower())
         to_idx = coord_to_index(payload.to_square.lower())
         if not from_idx or not to_idx:
             if seat_changed:
                 current["version"] += 1
                 save_state()
-            return {"ok": False, "error": "Invalid coordinates", "state": with_meta(game_id, current, payload.token)}
+            return {"ok": False, "error": "Invalid coordinates", "state": with_meta(game_id, current, session_id)}
         board = rows_to_board(current["board"])
         if get_player(board[from_idx["row"]][from_idx["col"]]) != payload.player:
             if seat_changed:
                 current["version"] += 1
                 save_state()
-            return {"ok": False, "error": "Not your piece", "state": with_meta(game_id, current, payload.token)}
+            return {"ok": False, "error": "Not your piece", "state": with_meta(game_id, current, session_id)}
         if game_id == GAME_SEATS:
-            seat_player = seat_player_for_token(current, payload.token)
+            seat_player = seat_player_for_session(current, session_id)
             if seat_player is None:
                 if seat_changed:
                     current["version"] += 1
                     save_state()
-                return {"ok": False, "error": "Seat required", "state": with_meta(game_id, current, payload.token)}
+                return {"ok": False, "error": "Seat required", "state": with_meta(game_id, current, session_id)}
             if seat_player != payload.player:
                 if seat_changed:
                     current["version"] += 1
                     save_state()
-                return {"ok": False, "error": "Seat mismatch", "state": with_meta(game_id, current, payload.token)}
+                return {"ok": False, "error": "Seat mismatch", "state": with_meta(game_id, current, session_id)}
         if not is_legal_move(board, from_idx, to_idx, payload.player):
             if seat_changed:
                 current["version"] += 1
                 save_state()
-            return {"ok": False, "error": "Illegal move", "state": with_meta(game_id, current, payload.token)}
+            return {"ok": False, "error": "Illegal move", "state": with_meta(game_id, current, session_id)}
 
         apply_move(board, from_idx, to_idx)
         now = int(time.time())
@@ -341,6 +373,8 @@ def post_move(payload: MoveRequest, game: str = Query(GAME_PUBLIC)) -> Dict[str,
                 seat["last_active"] = now
         current["board"] = board_to_rows(board)
         current["move_history"].append(f"P{payload.player}: {payload.from_square}-{payload.to_square}")
+        if len(current["move_history"]) > MAX_HISTORY:
+            current["move_history"] = current["move_history"][-MAX_HISTORY:]
         next_player = 2 if payload.player == 1 else 1
         current["current_player"] = next_player
         result = check_for_game_end(board, next_player)
@@ -357,22 +391,24 @@ def post_move(payload: MoveRequest, game: str = Query(GAME_PUBLIC)) -> Dict[str,
             current["stats"]["total_games"] += 1
         current["version"] += 1
         save_state()
-        return {"ok": True, "state": with_meta(game_id, current, payload.token)}
+        return {"ok": True, "state": with_meta(game_id, current, session_id)}
 
 
 @router.post("/reset")
-def reset_game(payload: ResetRequest, game: str = Query(GAME_PUBLIC)) -> Dict[str, Any]:
+def reset_game(request: Request, payload: ResetRequest, game: str = Query(GAME_PUBLIC)) -> Dict[str, Any]:
+    enforce_rate_limit(request, "reset", *MUTATION_RATE_LIMIT)
+    session_id = get_session_id(request)
     with state_lock:
         game_id = get_game_id(game)
         current = get_game(game_id)
         if payload.player not in (1, 2):
-            return {"ok": False, "error": "Invalid player", "state": with_meta(game_id, current, payload.token)}
+            return {"ok": False, "error": "Invalid player", "state": with_meta(game_id, current, session_id)}
         if not current["game_over"]:
-            return {"ok": False, "error": "Game still running", "state": with_meta(game_id, current, payload.token)}
+            return {"ok": False, "error": "Game still running", "state": with_meta(game_id, current, session_id)}
         if game_id == GAME_SEATS:
-            seat_player = seat_player_for_token(current, payload.token)
+            seat_player = seat_player_for_session(current, session_id)
             if seat_player != payload.player:
-                return {"ok": False, "error": "Seat required", "state": with_meta(game_id, current, payload.token)}
+                return {"ok": False, "error": "Seat required", "state": with_meta(game_id, current, session_id)}
         stats = current.get("stats", {"p1_wins": 0, "p2_wins": 0, "draws": 0, "total_games": 0})
         seats = current.get("seats") if game_id == GAME_SEATS else None
         replacement = default_game_state()
@@ -384,4 +420,4 @@ def reset_game(payload: ResetRequest, game: str = Query(GAME_PUBLIC)) -> Dict[st
         game_container.clear()
         game_container.update(replacement)
         save_state()
-        return {"ok": True, "state": with_meta(game_id, game_container, payload.token)}
+        return {"ok": True, "state": with_meta(game_id, game_container, session_id)}
