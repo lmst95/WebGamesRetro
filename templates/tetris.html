@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <section class="view active" id="tetrisView">
+    <div class="tetris-header">
+      <div>
+        <h1>Tetris Console</h1>
+        <p class="lead">Rotate with A / D, soft drop with S. Arrow keys move left or right.</p>
+      </div>
+    </div>
+    <div class="tetris-stage">
+      <div class="console tetris-console">
+        <div class="console-bar">match://tetris | state: live</div>
+        <div class="console-bar" id="tetrisStats">score://0 | lines://0 | level://1</div>
+        <div class="console-bar" id="tetrisStatus">status://ready</div>
+        <div class="tetris-layout">
+          <div class="tetris-board" id="tetrisBoard" role="grid" aria-label="Tetris board"></div>
+          <aside class="tetris-side">
+            <div class="tetris-panel">
+              <div class="tetris-panel-title">Next</div>
+              <div class="tetris-next" id="tetrisNext" role="grid" aria-label="Next piece"></div>
+            </div>
+            <div class="tetris-panel">
+              <div class="tetris-panel-title">Controls</div>
+              <div class="tetris-controls-info">
+                <div>Rotate left: A</div>
+                <div>Rotate right: D</div>
+                <div>Fast drop: S</div>
+                <div>Move: Arrow keys</div>
+              </div>
+            </div>
+          </aside>
+        </div>
+        <div class="tetris-mobile-controls" id="tetrisMobileControls">
+          <div class="tetris-control-stack left">
+            <button class="btn tetris-btn" data-action="rotate-left" type="button">rotate</button>
+            <button class="btn tetris-btn" data-action="move-left" type="button">left</button>
+          </div>
+          <button class="btn tetris-btn drop" data-action="soft-drop" type="button">drop</button>
+          <div class="tetris-control-stack right">
+            <button class="btn tetris-btn" data-action="rotate-right" type="button">rotate</button>
+            <button class="btn tetris-btn" data-action="move-right" type="button">right</button>
+          </div>
+        </div>
+        <div class="console-bar">mobile://buttons below | browser://a d s + arrows</div>
+      </div>
+    </div>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  <script src="/static/games/tetris.js"></script>
+{% endblock %}

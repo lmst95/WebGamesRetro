@@ -79,4 +79,15 @@ def chess_seats(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/games/tetris", response_class=HTMLResponse)
+def tetris(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        "tetris.html",
+        {
+            "request": request,
+            "title": "Tetris Console",
+        },
+    )
+
+
 app.include_router(chess_router)

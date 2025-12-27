@@ -42,6 +42,13 @@ let pollTimer = null;
 let timeTimer = null;
 let timeBase = null;
 
+function applySeatTheme() {
+  if (!chessView) {
+    return;
+  }
+  chessView.classList.toggle("is-seat-2", gameMode === "seats" && seatPlayer === 2);
+}
+
 if (moveForm) {
   moveForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -67,7 +74,47 @@ if (newGameBtn) {
 }
 
 function pieceGlyph(piece) {
-  return piece === "." ? " " : piece;
+  if (piece === ".") {
+    return " ";
+  }
+  const lower = piece.toLowerCase();
+  const isWhite = piece === piece.toUpperCase();
+  const whiteMap = {
+    k: "♔",
+    q: "♕",
+    r: "♖",
+    b: "♗",
+    n: "♘",
+    p: "♙",
+  };
+  const blackMap = {
+    k: "♚",
+    q: "♛",
+    r: "♜",
+    b: "♝",
+    n: "♞",
+    p: "♟",
+  };
+  const map = isWhite ? whiteMap : blackMap;
+  return map[lower] || piece;
+}
+
+function pieceMarkup(piece) {
+  if (piece === ".") {
+    return " ";
+  }
+  const isP1 = piece === piece.toUpperCase();
+  const pieceClass = isP1 ? "piece piece-p1" : "piece piece-p2";
+  return `<span class="${pieceClass}">${pieceGlyph(piece)}</span>`;
+}
+
+function shakeSubmitButton() {
+  if (!submitBtn) {
+    return;
+  }
+  submitBtn.classList.remove("is-shake");
+  void submitBtn.offsetWidth;
+  submitBtn.classList.add("is-shake");
 }
 
 function renderBoard(player) {
@@ -87,7 +134,7 @@ function renderBoard(player) {
   rows.forEach((row, index) => {
     const rank = rankLabels[index];
     const cells = row.map((piece, fileIndex) => {
-      const symbol = pieceGlyph(piece);
+      const symbol = pieceMarkup(piece);
       const shade = (index + fileIndex) % 2 === 0 ? " " : "#";
       return `${shade}${symbol}${shade}`;
     });
@@ -97,7 +144,7 @@ function renderBoard(player) {
   });
 
   lines.push("    " + fileLabels.map((f) => ` ${f} `).join(" "));
-  chessBoard.textContent = lines.join("\n");
+  chessBoard.innerHTML = lines.join("\n");
 }
 
 function getGameQuery() {
@@ -159,6 +206,7 @@ function applyState(state) {
       roleLine.textContent = "role://public";
     }
   }
+  applySeatTheme();
   if (activePlayer) {
     activePlayer.textContent = String(currentPlayer);
   }
@@ -247,10 +295,12 @@ async function submitMove(from, to) {
       }),
     });
     if (!response.ok) {
+      shakeSubmitButton();
       return;
     }
     const data = await response.json();
     if (!data.ok) {
+      shakeSubmitButton();
       return;
     }
     if (data.state) {
@@ -315,6 +365,7 @@ async function claimSeat() {
     }
     seatPlayer = data.player || 0;
     viewPlayer = seatPlayer || 0;
+    applySeatTheme();
     if (data.state) {
       lastVersion = data.state.version;
       applyState(data.state);

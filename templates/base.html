@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="/static/css/base.css" />
     {% block head_extra %}{% endblock %}
   </head>
-  <body>
+  <body class="{% if player == 2 %}is-player-2{% endif %}">
     <div class="bg-grid" aria-hidden="true"></div>
     <header class="site-header">
       <div class="brand">
@@ -24,9 +24,16 @@
       </button>
       <nav class="site-nav" id="navMenu">
         <a href="/">Home</a>
-        <a href="/games/chess/p1">Chess P1</a>
-        <a href="/games/chess/p2">Chess P2</a>
+        <div class="nav-split">
+          <span class="nav-label">Global Chess</span>
+          <span class="nav-options" aria-label="Global Chess options">
+            <a href="/games/chess/p1">P1</a>
+            <span class="nav-sep">|</span>
+            <a href="/games/chess/p2">P2</a>
+          </span>
+        </div>
         <a href="/games/chess/seats">Chess Seats</a>
+        <a href="/games/tetris">Tetris</a>
       </nav>
     </header>
 
@@ -34,7 +41,11 @@
       {% block content %}{% endblock %}
     </main>
 
-    <footer class="site-footer">SQLite persistence planned. Retro pixel vibe locked in.</footer>
+    <footer class="site-footer">
+      <span class="footer-text">Retro pixel vibe locked in.</span>
+      <span class="footer-sep">|</span>
+      <a class="footer-link" href="https://github.com/lmst95/WebGamesRetro">Source on GitHub</a>
+    </footer>
 
     <div class="modal" id="gameModal" aria-hidden="true">
       <div class="modal-card">
