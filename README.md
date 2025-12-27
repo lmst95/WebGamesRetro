@@ -2,7 +2,7 @@
 
 Retro console-style mini-game hub with a focus on ASCII/terminal visuals.
 
-## Usage
+## Usage (local)
 
 Run the FastAPI server and open the app in your browser (from the `app` folder):
 
@@ -11,6 +11,22 @@ python -m pip install -r requirements.txt
 export SECRET_KEY="replace-with-a-long-random-value"
 cd app
 uvicorn server:app --reload
+```
+
+Open `http://127.0.0.1:8000`.
+
+## Usage (Docker)
+
+Build the image from the repo root:
+
+```bash
+docker build -t web-games-console .
+```
+
+Run the container (set `SECRET_KEY`):
+
+```bash
+docker run --rm -p 8000:8000 -e SECRET_KEY="replace-with-a-long-random-value" web-games-console
 ```
 
 Open `http://127.0.0.1:8000`.
