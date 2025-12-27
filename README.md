@@ -44,14 +44,3 @@ Seats game (two seats with 5-minute turn expiry, everyone else is a visitor):
 
 4) Link it in the UI:
    - Add navigation links in `templates/base.html` and cards in `templates/home.html`.
-
-## Ideas
-- A website where you can play many games.
-- The whole website style should be retro and pixel-look.
-- Game states are saved in a simple json-file.
-- Games:
-  - Chess (console style). A page where you can play chess for player "1" or "2" by appending it to the link (like `.../chess/1/` or `.../chess/2/`).
-    - Everyone can play, without login.
-    - Normal chess rules, no time limit.
-    - Chessboard style is console-like: black background, white/neon-green fields, and figures only with ASCII/UTF-8 symbols.
-    - Depending on the player, your side is on the bottom and the enemy is on top.

@@ -196,6 +196,29 @@ body {
   --p1-neon: #39ff9d;
 }
 
+#hnefataflView[data-player="2"],
+#hnefataflView.is-seat-2 {
+  --neon: var(--accent);
+  --neon-soft: #fff2a6;
+  --shadow: rgba(255, 230, 109, 0.25);
+  --p1-neon: #39ff9d;
+}
+
+#hnefataflView[data-player="2"] .chess-actions .btn:not(.ghost) {
+  border-color: var(--p1-neon);
+  color: var(--p1-neon);
+  box-shadow: 0 0 14px rgba(57, 255, 157, 0.15);
+}
+
+#hnefataflView[data-player="2"] .chess-actions .btn:not(.ghost):hover {
+  box-shadow: 0 0 18px rgba(57, 255, 157, 0.35);
+}
+
+#hnefataflView.is-seat-2 #roleLine {
+  color: var(--accent);
+  text-shadow: 0 0 10px rgba(255, 230, 109, 0.35);
+}
+
 #chessView[data-player="2"] .chess-actions .btn:not(.ghost) {
   border-color: var(--p1-neon);
   color: var(--p1-neon);
@@ -562,6 +585,10 @@ h1, h2 {
   text-align: center;
   transform: translateX(-0.38ch);
   font-weight: 700;
+}
+
+#hnefataflView .board .piece {
+  transform: none;
 }
 
 .site-footer {

@@ -15,6 +15,8 @@ MAX_HISTORY = 200
 
 GAME_PUBLIC = "public"
 GAME_SEATS = "seats"
+GAME_CHESS = "chess"
+GAME_HNEFATAFL = "hnefatafl"
 
 state_lock = threading.Lock()
 
@@ -42,11 +44,52 @@ def default_game_state() -> Dict[str, Any]:
     }
 
 
+def default_hnefatafl_game_state() -> Dict[str, Any]:
+    board = [["."] * 9 for _ in range(9)]
+    king = (4, 4)
+    defenders = [
+        (4, 2), (4, 3), (4, 5), (4, 6),
+        (2, 4), (3, 4), (5, 4), (6, 4),
+    ]
+    attackers = [
+        (3, 0), (4, 0), (5, 0), (4, 1),
+        (3, 8), (4, 8), (5, 8), (4, 7),
+        (0, 3), (0, 4), (0, 5), (1, 4),
+        (8, 3), (8, 4), (8, 5), (7, 4),
+    ]
+    board[king[1]][king[0]] = "K"
+    for x, y in defenders:
+        board[y][x] = "D"
+    for x, y in attackers:
+        board[y][x] = "A"
+    return {
+        "board": ["".join(row) for row in board],
+        "current_player": 1 + secrets.randbelow(2),
+        "move_history": [],
+        "game_over": False,
+        "result": None,
+        "stats": {"p1_wins": 0, "p2_wins": 0, "draws": 0, "total_games": 0},
+        "started_at": None,
+        "last_played_at": None,
+        "version": 0,
+    }
+
+
+def build_game_container(default_factory) -> Dict[str, Any]:
+    public = default_factory()
+    seats = default_factory()
+    seats["seats"] = {"p1": None, "p2": None}
+    return {
+        GAME_PUBLIC: public,
+        GAME_SEATS: seats,
+    }
+
+
 def default_state() -> Dict[str, Any]:
     return {
         "games": {
-            GAME_PUBLIC: default_game_state(),
-            GAME_SEATS: {**default_game_state(), "seats": {"p1": None, "p2": None}},
+            GAME_CHESS: build_game_container(default_game_state),
+            GAME_HNEFATAFL: build_game_container(default_hnefatafl_game_state),
         }
     }
 
@@ -99,7 +142,7 @@ def load_state() -> None:
         return
     if "games" not in data and "board" in data:
         migrated = default_state()
-        migrated["games"][GAME_PUBLIC] = merge_game_state(default_game_state(), data)
+        migrated["games"][GAME_CHESS][GAME_PUBLIC] = merge_game_state(default_game_state(), data)
         STATE = migrated
         return
     games = data.get("games")
@@ -107,9 +150,21 @@ def load_state() -> None:
         STATE = default_state()
         return
     state = default_state()
-    for game_id in (GAME_PUBLIC, GAME_SEATS):
-        if game_id in games and isinstance(games[game_id], dict):
-            state["games"][game_id] = merge_game_state(state["games"][game_id], games[game_id])
+    if GAME_PUBLIC in games or GAME_SEATS in games:
+        chess_container = state["games"][GAME_CHESS]
+        if GAME_PUBLIC in games and isinstance(games[GAME_PUBLIC], dict):
+            chess_container[GAME_PUBLIC] = merge_game_state(default_game_state(), games[GAME_PUBLIC])
+        if GAME_SEATS in games and isinstance(games[GAME_SEATS], dict):
+            chess_container[GAME_SEATS] = merge_game_state(chess_container[GAME_SEATS], games[GAME_SEATS])
+        STATE = state
+        return
+    for game_name, defaults in state["games"].items():
+        incoming = games.get(game_name)
+        if not isinstance(incoming, dict):
+            continue
+        for game_id in (GAME_PUBLIC, GAME_SEATS):
+            if game_id in incoming and isinstance(incoming[game_id], dict):
+                state["games"][game_name][game_id] = merge_game_state(defaults[game_id], incoming[game_id])
     STATE = state
 
 
@@ -124,8 +179,8 @@ def get_game_id(game: str) -> str:
     return GAME_SEATS if game == GAME_SEATS else GAME_PUBLIC
 
 
-def get_game(game_id: str) -> Dict[str, Any]:
-    return STATE["games"][game_id]
+def get_game(game_id: str, game_name: str = GAME_CHESS) -> Dict[str, Any]:
+    return STATE["games"][game_name][game_id]
 
 
 def with_meta(game_id: str, game: Dict[str, Any], session_id: Optional[str] = None) -> Dict[str, Any]:

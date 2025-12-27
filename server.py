@@ -10,6 +10,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from games.chess import router as chess_router
+from games.hnefatafl import router as hnefatafl_router
 from games.state import GAME_PUBLIC, GAME_SEATS, load_state, state_lock
 
 ROOT = Path(__file__).resolve().parent
@@ -97,6 +98,54 @@ def chess_seats(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/games/hnefatafl/p1", response_class=HTMLResponse)
+def hnefatafl_p1(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        "hnefatafl.html",
+        {
+            "request": request,
+            "title": "Hnefatafl Console",
+            "subtitle": "Public game: Player 1 view (defenders).",
+            "game_mode": GAME_PUBLIC,
+            "player": 1,
+            "show_actions": True,
+            "footer_note": "Defenders escort the king to a castle.",
+        },
+    )
+
+
+@app.get("/games/hnefatafl/p2", response_class=HTMLResponse)
+def hnefatafl_p2(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        "hnefatafl.html",
+        {
+            "request": request,
+            "title": "Hnefatafl Console",
+            "subtitle": "Public game: Player 2 view (attackers).",
+            "game_mode": GAME_PUBLIC,
+            "player": 2,
+            "show_actions": True,
+            "footer_note": "Attackers surround the king.",
+        },
+    )
+
+
+@app.get("/games/hnefatafl/seats", response_class=HTMLResponse)
+def hnefatafl_seats(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        "hnefatafl.html",
+        {
+            "request": request,
+            "title": "Hnefatafl Seats",
+            "subtitle": "Seat mode: claim Seat 1 (defenders) or Seat 2 (attackers).",
+            "game_mode": GAME_SEATS,
+            "player": 0,
+            "show_actions": False,
+            "footer_note": "Seats expire after 5 minutes on your turn.",
+        },
+    )
+
+
 @app.get("/games/tetris", response_class=HTMLResponse)
 def tetris(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
@@ -109,3 +158,4 @@ def tetris(request: Request) -> HTMLResponse:
 
 
 app.include_router(chess_router)
+app.include_router(hnefatafl_router)
