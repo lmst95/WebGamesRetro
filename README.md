@@ -4,11 +4,12 @@ Retro console-style mini-game hub with a focus on ASCII/terminal visuals.
 
 ## Usage
 
-Run the FastAPI server and open the app in your browser:
+Run the FastAPI server and open the app in your browser (from the `app` folder):
 
 ```bash
 python -m pip install -r requirements.txt
 export SECRET_KEY="replace-with-a-long-random-value"
+cd app
 uvicorn server:app --reload
 ```
 
@@ -30,17 +31,17 @@ Seats game (two seats with 5-minute turn expiry, everyone else is a visitor):
 ## How to add a new game
 
 1) Create a template for the game page:
-   - Add `templates/<game>.html` and extend `templates/base.html`.
+   - Add `app/templates/<game>.html` and extend `app/templates/base.html`.
    - Include a game script in a `{% block scripts %}` section.
 
 2) Add frontend assets:
-   - Put shared styles in `static/css/base.css`.
-   - Add per-game logic to `static/games/<game>.js`.
+   - Put shared styles in `app/static/css/base.css`.
+   - Add per-game logic to `app/static/games/<game>.js`.
 
 3) Add backend routes and API:
-   - Create `games/<game>.py` and define an `APIRouter`.
-   - Register the router in `server.py` with `app.include_router(...)`.
-   - Add the page routes in `server.py` (e.g., `/games/<game>/...`) that render the template.
+   - Create `app/games/<game>.py` and define an `APIRouter`.
+   - Register the router in `app/server.py` with `app.include_router(...)`.
+   - Add the page routes in `app/server.py` (e.g., `/games/<game>/...`) that render the template.
 
 4) Link it in the UI:
-   - Add navigation links in `templates/base.html` and cards in `templates/home.html`.
+   - Add navigation links in `app/templates/base.html` and cards in `app/templates/home.html`.

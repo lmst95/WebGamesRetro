@@ -2,22 +2,21 @@ from __future__ import annotations
 
 import secrets
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
-from games.limiter import allow_request
-from games.state import (
-    GAME_HNEFATAFL,
+from .limiter import allow_request
+from .state import (
     GAME_PUBLIC,
     GAME_SEATS,
-    MAX_HISTORY,
     claim_seat,
-    default_hnefatafl_game_state,
+    default_game_state,
     expire_seats,
     get_game,
     get_game_id,
+    MAX_HISTORY,
     save_state,
     seat_player_for_session,
     state_lock,
@@ -44,10 +43,7 @@ class SeatRequest(BaseModel):
     pass
 
 
-FILES = ["a", "b", "c", "d", "e", "f", "g", "h", "i"]
-BOARD_SIZE = 9
-CASTLES = {(0, 0), (0, 8), (8, 0), (8, 8)}
-THRONE = (4, 4)
+FILES = ["a", "b", "c", "d", "e", "f", "g", "h"]
 STATE_RATE_LIMIT = (240, 60)
 MUTATION_RATE_LIMIT = (30, 60)
 
@@ -86,8 +82,8 @@ def coord_to_index(coord: str) -> Optional[Dict[str, int]]:
     col = FILES.index(file) if file in FILES else -1
     if col < 0:
         return None
-    row = BOARD_SIZE - rank
-    if row < 0 or row >= BOARD_SIZE:
+    row = 8 - rank
+    if row < 0 or row > 7:
         return None
     return {"row": row, "col": col}
 
@@ -95,22 +91,24 @@ def coord_to_index(coord: str) -> Optional[Dict[str, int]]:
 def get_player(piece: str) -> int:
     if piece == ".":
         return 0
-    if piece == "A":
-        return 2
-    return 1
+    return 1 if piece.isupper() else 2
 
 
 def is_inside(row: int, col: int) -> bool:
-    return 0 <= row < BOARD_SIZE and 0 <= col < BOARD_SIZE
-
-
-def is_special_square(row: int, col: int) -> bool:
-    return (row, col) == THRONE or (row, col) in CASTLES
+    return 0 <= row < 8 and 0 <= col < 8
 
 
 def is_friendly(board: List[List[str]], row: int, col: int, player: int) -> bool:
     piece = board[row][col]
     return piece != "." and get_player(piece) == player
+
+
+def apply_move(board: List[List[str]], from_idx: Dict[str, int], to_idx: Dict[str, int]) -> None:
+    piece = board[from_idx["row"]][from_idx["col"]]
+    board[to_idx["row"]][to_idx["col"]] = piece
+    board[from_idx["row"]][from_idx["col"]] = "."
+    if piece.lower() == "p" and (to_idx["row"] == 0 or to_idx["row"] == 7):
+        board[to_idx["row"]][to_idx["col"]] = "Q" if get_player(piece) == 1 else "q"
 
 
 def rows_to_board(rows: List[str]) -> List[List[str]]:
@@ -121,138 +119,171 @@ def board_to_rows(board: List[List[str]]) -> List[str]:
     return ["".join(row) for row in board]
 
 
-def path_clear(board: List[List[str]], from_idx: Dict[str, int], to_idx: Dict[str, int], piece: str) -> bool:
-    from_row = from_idx["row"]
-    from_col = from_idx["col"]
-    to_row = to_idx["row"]
-    to_col = to_idx["col"]
-    if from_row == to_row and from_col == to_col:
-        return False
-    if from_row != to_row and from_col != to_col:
-        return False
-    if board[to_row][to_col] != ".":
-        return False
-    if piece != "K" and is_special_square(to_row, to_col):
-        return False
-    step_row = 0 if from_row == to_row else (1 if to_row > from_row else -1)
-    step_col = 0 if from_col == to_col else (1 if to_col > from_col else -1)
-    cur_row = from_row + step_row
-    cur_col = from_col + step_col
-    while (cur_row, cur_col) != (to_row, to_col):
-        if board[cur_row][cur_col] != ".":
-            return False
-        if piece != "K" and is_special_square(cur_row, cur_col):
-            return False
-        cur_row += step_row
-        cur_col += step_col
-    return True
+def get_pseudo_moves(board: List[List[str]], row: int, col: int, piece: str) -> List[Dict[str, int]]:
+    moves: List[Dict[str, int]] = []
+    piece_type = piece.lower()
+    player = get_player(piece)
+    is_white = player == 1
+
+    if piece_type == "p":
+        direction = -1 if is_white else 1
+        start_row = 6 if is_white else 1
+        next_row = row + direction
+        if is_inside(next_row, col) and board[next_row][col] == ".":
+            moves.append({"row": next_row, "col": col})
+            two_row = row + direction * 2
+            if row == start_row and board[two_row][col] == ".":
+                moves.append({"row": two_row, "col": col})
+        for delta in (-1, 1):
+            capture_row = row + direction
+            capture_col = col + delta
+            if (
+                is_inside(capture_row, capture_col)
+                and board[capture_row][capture_col] != "."
+                and get_player(board[capture_row][capture_col]) != player
+            ):
+                moves.append({"row": capture_row, "col": capture_col})
+    elif piece_type == "n":
+        jumps = [
+            (2, 1), (1, 2), (-1, 2), (-2, 1),
+            (-2, -1), (-1, -2), (1, -2), (2, -1),
+        ]
+        for dr, dc in jumps:
+            target_row = row + dr
+            target_col = col + dc
+            if is_inside(target_row, target_col) and not is_friendly(board, target_row, target_col, player):
+                moves.append({"row": target_row, "col": target_col})
+    elif piece_type in ("b", "r", "q"):
+        directions: List[tuple[int, int]] = []
+        if piece_type in ("b", "q"):
+            directions += [(1, 1), (1, -1), (-1, 1), (-1, -1)]
+        if piece_type in ("r", "q"):
+            directions += [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        for dr, dc in directions:
+            target_row = row + dr
+            target_col = col + dc
+            while is_inside(target_row, target_col):
+                if board[target_row][target_col] == ".":
+                    moves.append({"row": target_row, "col": target_col})
+                else:
+                    if not is_friendly(board, target_row, target_col, player):
+                        moves.append({"row": target_row, "col": target_col})
+                    break
+                target_row += dr
+                target_col += dc
+    elif piece_type == "k":
+        for dr in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                if dr == 0 and dc == 0:
+                    continue
+                target_row = row + dr
+                target_col = col + dc
+                if is_inside(target_row, target_col) and not is_friendly(board, target_row, target_col, player):
+                    moves.append({"row": target_row, "col": target_col})
+
+    return moves
 
 
-def apply_move(board: List[List[str]], from_idx: Dict[str, int], to_idx: Dict[str, int]) -> None:
-    piece = board[from_idx["row"]][from_idx["col"]]
-    board[to_idx["row"]][to_idx["col"]] = piece
-    board[from_idx["row"]][from_idx["col"]] = "."
-
-
-def collect_captures(board: List[List[str]], row: int, col: int, player: int) -> List[Tuple[int, int]]:
-    captures: List[Tuple[int, int]] = []
-    for dr, dc in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-        adj_row = row + dr
-        adj_col = col + dc
-        if not is_inside(adj_row, adj_col):
-            continue
-        adj_piece = board[adj_row][adj_col]
-        if adj_piece == "." or get_player(adj_piece) == player or adj_piece == "K":
-            continue
-        beyond_row = adj_row + dr
-        beyond_col = adj_col + dc
-        if not is_inside(beyond_row, beyond_col):
-            continue
-        beyond_piece = board[beyond_row][beyond_col]
-        if beyond_piece != "." and get_player(beyond_piece) == player:
-            captures.append((adj_row, adj_col))
-    return captures
-
-
-def apply_captures(board: List[List[str]], captures: List[Tuple[int, int]]) -> None:
-    for row, col in captures:
-        board[row][col] = "."
-
-
-def find_king(board: List[List[str]]) -> Optional[Tuple[int, int]]:
-    for row in range(BOARD_SIZE):
-        for col in range(BOARD_SIZE):
-            if board[row][col] == "K":
-                return row, col
+def find_king(board: List[List[str]], player: int) -> Optional[Dict[str, int]]:
+    target = "K" if player == 1 else "k"
+    for row in range(8):
+        for col in range(8):
+            if board[row][col] == target:
+                return {"row": row, "col": col}
     return None
 
 
-def is_king_captured(board: List[List[str]]) -> bool:
-    king_pos = find_king(board)
-    if not king_pos:
-        return True
-    row, col = king_pos
-    neighbors = []
-    for dr, dc in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-        nr = row + dr
-        nc = col + dc
-        if is_inside(nr, nc):
-            neighbors.append((nr, nc))
-    return neighbors and all(board[nr][nc] == "A" for nr, nc in neighbors)
-
-
-def is_king_on_castle(board: List[List[str]]) -> bool:
-    for row, col in CASTLES:
-        if board[row][col] == "K":
-            return True
+def is_square_attacked(board: List[List[str]], row: int, col: int, attacker: int) -> bool:
+    for r in range(8):
+        for c in range(8):
+            piece = board[r][c]
+            if piece == "." or get_player(piece) != attacker:
+                continue
+            piece_type = piece.lower()
+            if piece_type == "p":
+                direction = -1 if attacker == 1 else 1
+                attacks = [(direction, -1), (direction, 1)]
+                if any(r + dr == row and c + dc == col for dr, dc in attacks):
+                    return True
+            elif piece_type == "n":
+                jumps = [
+                    (2, 1), (1, 2), (-1, 2), (-2, 1),
+                    (-2, -1), (-1, -2), (1, -2), (2, -1),
+                ]
+                if any(r + dr == row and c + dc == col for dr, dc in jumps):
+                    return True
+            elif piece_type in ("b", "r", "q"):
+                directions: List[tuple[int, int]] = []
+                if piece_type in ("b", "q"):
+                    directions += [(1, 1), (1, -1), (-1, 1), (-1, -1)]
+                if piece_type in ("r", "q"):
+                    directions += [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                for dr, dc in directions:
+                    tr = r + dr
+                    tc = c + dc
+                    while is_inside(tr, tc):
+                        if tr == row and tc == col:
+                            return True
+                        if board[tr][tc] != ".":
+                            break
+                        tr += dr
+                        tc += dc
+            elif piece_type == "k":
+                if abs(r - row) <= 1 and abs(c - col) <= 1:
+                    return True
     return False
 
 
-def is_castle_blocked(board: List[List[str]], castle: Tuple[int, int]) -> bool:
-    row, col = castle
-    adjacent = []
-    for dr, dc in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-        nr = row + dr
-        nc = col + dc
-        if is_inside(nr, nc):
-            adjacent.append((nr, nc))
-    return len(adjacent) == 2 and all(board[nr][nc] == "A" for nr, nc in adjacent)
+def is_in_check(board: List[List[str]], player: int) -> bool:
+    king_pos = find_king(board, player)
+    if not king_pos:
+        return False
+    opponent = 2 if player == 1 else 1
+    return is_square_attacked(board, king_pos["row"], king_pos["col"], opponent)
 
 
-def all_castles_blocked(board: List[List[str]]) -> bool:
-    return all(is_castle_blocked(board, castle) for castle in CASTLES)
+def get_legal_moves(board: List[List[str]], player: int) -> List[Dict[str, Dict[str, int]]]:
+    moves: List[Dict[str, Dict[str, int]]] = []
+    for row in range(8):
+        for col in range(8):
+            piece = board[row][col]
+            if piece == "." or get_player(piece) != player:
+                continue
+            for to_idx in get_pseudo_moves(board, row, col, piece):
+                clone = [r[:] for r in board]
+                apply_move(clone, {"row": row, "col": col}, to_idx)
+                if not is_in_check(clone, player):
+                    moves.append({"from": {"row": row, "col": col}, "to": to_idx})
+    return moves
 
 
 def is_legal_move(board: List[List[str]], from_idx: Dict[str, int], to_idx: Dict[str, int], player: int) -> bool:
-    piece = board[from_idx["row"]][from_idx["col"]]
-    if get_player(piece) != player:
-        return False
-    if not path_clear(board, from_idx, to_idx, piece):
-        return False
-    clone = [row[:] for row in board]
-    apply_move(clone, from_idx, to_idx)
-    captures = collect_captures(clone, to_idx["row"], to_idx["col"], player)
-    apply_captures(clone, captures)
-    if player == 2 and all_castles_blocked(clone):
-        return False
-    return True
+    return any(
+        move["from"]["row"] == from_idx["row"]
+        and move["from"]["col"] == from_idx["col"]
+        and move["to"]["row"] == to_idx["row"]
+        and move["to"]["col"] == to_idx["col"]
+        for move in get_legal_moves(board, player)
+    )
 
 
-def check_for_game_end(board: List[List[str]]) -> Optional[Dict[str, Any]]:
-    if is_king_on_castle(board):
-        return {"title": "Escape", "message": "Winner: Player 1", "winner": 1}
-    if is_king_captured(board):
-        return {"title": "Capture", "message": "Winner: Player 2", "winner": 2}
-    return None
+def check_for_game_end(board: List[List[str]], player_to_move: int) -> Optional[Dict[str, Any]]:
+    legal_moves = get_legal_moves(board, player_to_move)
+    if legal_moves:
+        return None
+    if is_in_check(board, player_to_move):
+        winner = 2 if player_to_move == 1 else 1
+        return {"title": "Checkmate", "message": f"Winner: Player {winner}", "winner": winner}
+    return {"title": "Draw", "message": "Stalemate", "winner": None}
 
 
-@router.get("/hnefatafl/state")
+@router.get("/state")
 def get_state(request: Request, game: str = Query(GAME_PUBLIC)) -> Dict[str, Any]:
-    enforce_rate_limit(request, "hnefatafl_state", *STATE_RATE_LIMIT)
+    enforce_rate_limit(request, "state", *STATE_RATE_LIMIT)
     session_id = get_session_id(request)
     with state_lock:
         game_id = get_game_id(game)
-        current = get_game(game_id, GAME_HNEFATAFL)
+        current = get_game(game_id)
         if game_id == GAME_SEATS:
             if expire_seats(current, int(time.time())):
                 current["version"] += 1
@@ -260,12 +291,12 @@ def get_state(request: Request, game: str = Query(GAME_PUBLIC)) -> Dict[str, Any
         return with_meta(game_id, current, session_id)
 
 
-@router.post("/hnefatafl/seat")
+@router.post("/seat")
 def seat(request: Request, payload: SeatRequest) -> Dict[str, Any]:
-    enforce_rate_limit(request, "hnefatafl_seat", *MUTATION_RATE_LIMIT)
+    enforce_rate_limit(request, "seat", *MUTATION_RATE_LIMIT)
     session_id = get_session_id(request)
     with state_lock:
-        game = get_game(GAME_SEATS, GAME_HNEFATAFL)
+        game = get_game(GAME_SEATS)
         now = int(time.time())
         seat_result = claim_seat(game, session_id, now)
         game["version"] += 1
@@ -274,13 +305,13 @@ def seat(request: Request, payload: SeatRequest) -> Dict[str, Any]:
         return {"ok": True, "player": seat_result["player"], "state": response}
 
 
-@router.post("/hnefatafl/move")
+@router.post("/move")
 def post_move(request: Request, payload: MoveRequest, game: str = Query(GAME_PUBLIC)) -> Dict[str, Any]:
-    enforce_rate_limit(request, "hnefatafl_move", *MUTATION_RATE_LIMIT)
+    enforce_rate_limit(request, "move", *MUTATION_RATE_LIMIT)
     session_id = get_session_id(request)
     with state_lock:
         game_id = get_game_id(game)
-        current = get_game(game_id, GAME_HNEFATAFL)
+        current = get_game(game_id)
         seat_changed = False
         if game_id == GAME_SEATS:
             seat_changed = expire_seats(current, int(time.time()))
@@ -331,9 +362,6 @@ def post_move(request: Request, payload: MoveRequest, game: str = Query(GAME_PUB
             return {"ok": False, "error": "Illegal move", "state": with_meta(game_id, current, session_id)}
 
         apply_move(board, from_idx, to_idx)
-        captures = collect_captures(board, to_idx["row"], to_idx["col"], payload.player)
-        apply_captures(board, captures)
-
         now = int(time.time())
         if current.get("started_at") is None:
             current["started_at"] = now
@@ -349,7 +377,7 @@ def post_move(request: Request, payload: MoveRequest, game: str = Query(GAME_PUB
             current["move_history"] = current["move_history"][-MAX_HISTORY:]
         next_player = 2 if payload.player == 1 else 1
         current["current_player"] = next_player
-        result = check_for_game_end(board)
+        result = check_for_game_end(board, next_player)
         current["game_over"] = result is not None
         current["result"] = result
         if result:
@@ -366,13 +394,13 @@ def post_move(request: Request, payload: MoveRequest, game: str = Query(GAME_PUB
         return {"ok": True, "state": with_meta(game_id, current, session_id)}
 
 
-@router.post("/hnefatafl/reset")
+@router.post("/reset")
 def reset_game(request: Request, payload: ResetRequest, game: str = Query(GAME_PUBLIC)) -> Dict[str, Any]:
-    enforce_rate_limit(request, "hnefatafl_reset", *MUTATION_RATE_LIMIT)
+    enforce_rate_limit(request, "reset", *MUTATION_RATE_LIMIT)
     session_id = get_session_id(request)
     with state_lock:
         game_id = get_game_id(game)
-        current = get_game(game_id, GAME_HNEFATAFL)
+        current = get_game(game_id)
         if payload.player not in (1, 2):
             return {"ok": False, "error": "Invalid player", "state": with_meta(game_id, current, session_id)}
         if not current["game_over"]:
@@ -383,12 +411,12 @@ def reset_game(request: Request, payload: ResetRequest, game: str = Query(GAME_P
                 return {"ok": False, "error": "Seat required", "state": with_meta(game_id, current, session_id)}
         stats = current.get("stats", {"p1_wins": 0, "p2_wins": 0, "draws": 0, "total_games": 0})
         seats = current.get("seats") if game_id == GAME_SEATS else None
-        replacement = default_hnefatafl_game_state()
+        replacement = default_game_state()
         replacement["stats"] = stats
         if game_id == GAME_SEATS:
             replacement["seats"] = seats or {"p1": None, "p2": None}
         replacement["version"] += 1
-        game_container = get_game(game_id, GAME_HNEFATAFL)
+        game_container = get_game(game_id)
         game_container.clear()
         game_container.update(replacement)
         save_state()
