@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+  <defs>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="48" height="48" fill="#0b0f0c"/>
+  <rect x="2" y="2" width="44" height="44" fill="none" stroke="#39ff9d" stroke-width="2"/>
+  <text x="24" y="31" font-family="'Lucida Console', 'Courier New', monospace" font-size="20" font-weight="bold" fill="#39ff9d" text-anchor="middle" filter="url(#glow)">WG</text>
+</svg>
